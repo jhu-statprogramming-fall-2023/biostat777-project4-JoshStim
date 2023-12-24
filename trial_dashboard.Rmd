@@ -260,7 +260,7 @@ renderPlot({youtube.mod %>%
         plot.title = element_text(size = 20),
         axis.text.x = element_text(size = 12),
         axis.text.y = element_text(size = 12))
-}, height = 800, width = 1200)
+}, height = 700, width = 1100)
 ```
 
 # Favorability by Brand
