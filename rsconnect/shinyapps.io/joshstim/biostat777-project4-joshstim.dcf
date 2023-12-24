@@ -1,0 +1,10 @@
+name: biostat777-project4-joshstim
+title:
+username: joshstim
+account: joshstim
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 10842770
+bundleId: 8079787
+url: https://joshstim.shinyapps.io/biostat777-project4-joshstim/
+version: 1
