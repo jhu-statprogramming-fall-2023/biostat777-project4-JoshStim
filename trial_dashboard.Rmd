@@ -4,33 +4,354 @@ output:
   flexdashboard::flex_dashboard:
     orientation: columns
     vertical_layout: fill
+runtime: shiny
 ---
 
-```{r setup, include=FALSE}
+```{r global, include=FALSE}
+################################################################################
+# Load R libraries
+################################################################################
 library(flexdashboard)
+library(here)
+library(DT)
+library(dplyr)
+library(purrr)
+library(ggplot2)
+library(tidyr)
+library(forcats)
+library(plotly)
+library(leaps)
+
+################################################################################
+# Read in data
+################################################################################
+make_data_here <- function() {
+  dir.create(here("data"))
+}
+
+if (!file.exists(here("data","youtube.csv"))) {
+  
+  if (!dir.exists(here("data"))) {
+    make_data_here()
+  }
+  
+  tuesdata <- tidytuesdayR::tt_load(2021, week = 10)
+  youtube.raw <- tuesdata$youtube
+  write.csv(youtube.raw, here("data","youtube.csv"))
+  
+} else {
+  
+  youtube.raw <- read.csv(here("data","youtube.csv"))
+  
+}
+
+size_factor <- 1/2
+youtube.mod <- youtube.raw %>%
+  mutate(like_to_dislike = (like_count + 1) / (dislike_count + 1),
+         view_group = case_when(view_count > 10 ** 6 ~ (size_factor)**0,
+         view_count > 10 ** 5 & view_count <= 10 ** 6 ~ (size_factor)**1,
+         view_count > 10 ** 4 & view_count <= 10 ** 5 ~ (size_factor)**2,
+         view_count > 10 ** 3 & view_count <= 10 ** 4 ~ (size_factor)**3,
+         view_count > 0 & view_count <= 10 ** 3 ~ (size_factor)**4)) %>%
+  mutate(view_factor = factor(view_group),
+         view_count_log10 = log10(view_count),
+         like_to_dislike_log10 = log10(like_to_dislike))
+
+levels(youtube.mod$view_factor) <- c("views \u2264 1,000",
+                         "1,000 < views \u2264 10,000",
+                         "10,000 < views \u2264 100,000",
+                         "100,000 < views \u2264 1,000,000",
+                         "views > 1,000,000")
+
+# pal <- c(
+#   "views \u2264 1,000" = "#F8766D",
+#   "1,000 < views \u2264 10,000" = "#B79F00", 
+#   "10,000 < views \u2264 100,000" = "#00BA38", 
+#   "100,000 < views \u2264 1,000,000" = "#00BFC4",
+#   "views > 1,000,000" = "#F564E3"
+# )
+
 ```
 
-Column {data-width=650}
------------------------------------------------------------------------
+# About {.tabset}
 
-### Chart A
+## Column 1
 
+### Purpose
+Here, we explore the factors related to Superbowl commercial likability. This dashboard provides static and interactive data visualizations that summarize data on 247 Superbowl commercials between the years 2000 and 2020. It also summarizes a linear regression model that models commercial likability using commercial view count, attributes, and year of release.
+
+### Aims
+In this analysis, I seek to answer the following questions about Superbowl commercials:
+
+  1. What are the most common superbowl commercial attributes, and how do they vary in usage over time and within brands?
+  
+  2. Which commercial attributes are associated with higher favorability?
+  
+  3. To what extent does Superbowl commercial favorability vary over time and between brands?
+  
+  4. Using multiple linear regression, can we identify significant predictors of commercial favorability?
+  
+I will be using the commercial's **like-to-dislike ratio** from youtube to quantify its favorability.
+
+The data for this analysis comes from [Five-Thirty-Eight](https://github.com/fivethirtyeight/superbowl-ads) by-way-of [TidyTuesday](https://github.com/rfordatascience/tidytuesday/blob/master/data/2021/2021-03-02/readme.md).
+
+## Column 2 {data-width = 150}
+### Video Demo
+<iframe
+    width="640"
+    height="480"
+    src="https://www.youtube.com/embed/eS4n5XC-pvA"
+    frameborder="0"
+    allow="autoplay; encrypted-media"
+    allowfullscreen
+>
+</iframe>
+
+# The Data
+
+## Column 1 {data-width=300}
+### Description
+The data for this analysis provides information on 247 Superbowl commercials between the years 2000 and 2020. Each commercial is evaluated on the presence or absence of 7 different attributes, and the youtube view counts, like counts, and dislike counts are also provided.
+
+Additionally, I used the provided data to calculate like-to-dislike ratio for each commercial.
+
+## Column 2 {data-width=650}
+### Table 1
 ```{r}
-
+youtube.mod %>%
+  arrange(desc(year)) %>%
+  select(year, brand, funny:use_sex, like_count:comment_count, 
+         view_count, view_count_log10,
+         like_to_dislike, like_to_dislike_log10) %>%
+  datatable()
 ```
 
-Column {data-width=350}
------------------------------------------------------------------------
+# Attribute Usage/Favorability
+## Column 1 {.tabset}
+### Figure 1
 
-### Chart B
+```{r, fig.width = 12, fig.height = 10}
+youtube.attr_by_year <- split(youtube.mod, youtube.mod$year) %>%
+  map(function(x) summarize(x, n = n(),
+                            funny = mean(funny),
+                            celebrity = mean(celebrity),
+                            use_sex = mean(use_sex),
+                            spq = mean(show_product_quickly),
+                            patriotic = mean(patriotic),
+                            danger = mean(danger),
+                            animals = mean(animals),
+                            lltd = mean(like_to_dislike, na.rm = TRUE))) %>%
+  map_df(.f = ~.x, .id = "year") %>%
+  pivot_longer(cols = funny:animals, names_to = "attribute", values_to = "relative_prop")
 
+youtube.attr_by_year %>%
+  ggplot(aes(x = year, y = relative_prop, color = attribute, group = 1)) +
+  geom_line() +
+  facet_wrap(~attribute) +
+  labs(title = "Trends in Commercial Attribute Use over Time",
+       subtitle = "The use of 'funny' and 'sex' is decreasing over time, while 'celebrity' and 'patriotic' is rising.",
+       x = "Year",
+       y = "Relative Proportion",
+       caption = "Units on the x-axis are discrete. Line plots were used for the ease of viewing.") +
+  scale_x_discrete(breaks=seq(2000,2020,5)) +
+  theme_bw() +
+  theme(legend.position = "none",
+        text = element_text(size = 15),
+        plot.title = element_text(size = 20),
+        axis.text.x = element_text(size = 12),
+        axis.text.y = element_text(size = 12))
+```
+
+### Figure 2.
+
+```{r, fig.width = 12, fig.height = 10}
+youtube.mod %>%
+  select(funny, show_product_quickly, patriotic, animals, danger, 
+         celebrity, use_sex, like_to_dislike) %>%
+  pivot_longer(cols = funny:use_sex,
+               names_to = "attribute",
+               values_to = "value") %>%
+  ggplot(aes(x = value, y = like_to_dislike, fill = attribute)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(width = 0.15, alpha = 0.25, size = 1) +
+  stat_summary(fun = "mean", color = "white", shape = 3) +
+  scale_y_continuous(trans = 'log10') +
+  facet_wrap(~attribute) +
+  labs(title = "Commercial Favorability by Attribute",
+       subtitle = "'Celebrity' and 'Danger' are associated with greater mean commericial favorability.",
+       caption = "NOTE: Y-axis is on a log10 scale.",
+       x = "Level",
+       y = "Likes-to-Dislikes Ratio") +
+  theme_bw() +
+  theme(legend.position = 'none',
+        text = element_text(size = 15),
+        plot.title = element_text(size = 20),
+        axis.text.x = element_text(size = 12),
+        axis.text.y = element_text(size = 12))
+```
+
+# Attribute Usage by Brand
+
+## Column 1
+### Figure 3.
+
+```{r fig.width = 12, fig.height = 10}
+youtube.attr_by_brand <- split(youtube.mod, youtube.mod$brand) %>%
+  map(function(x) summarize(x, n = n(),
+                            funny = mean(funny),
+                            celebrity = mean(celebrity),
+                            use_sex = mean(use_sex),
+                            spq = mean(show_product_quickly),
+                            patriotic = mean(patriotic),
+                            danger = mean(danger),
+                            animals = mean(animals),
+                            lltd = mean(like_to_dislike, na.rm = TRUE))) %>%
+  map_df(.f = ~.x, .id = "brand") %>%
+  pivot_longer(cols = funny:animals, names_to = "attribute", values_to = "relative_prop")
+
+youtube.attr_by_brand %>%
+  ggplot(aes(x = attribute, y = brand, fill = relative_prop)) +
+  geom_tile() +
+  scale_fill_gradient(low = "white", high = "red") +
+  geom_text(aes(label=round(relative_prop,2)), colour = "black", check_overlap = TRUE) +
+  labs(title = "Proportion of Brand's Commericials exhibiting Attribute",
+       subtitle = "'Funny' and 'Shows product quickly' are among the most common attributes.",
+       x = "Commercial Attribute",
+       y = "Brand",
+       fill = "Relative Proportion",
+       caption = "Colors represent the proportion of a brand's commercials containing an attribute.") +
+  theme_bw() +
+  theme(text = element_text(size = 15),
+        plot.title = element_text(size = 20),
+        axis.text.x = element_text(size = 12),
+        axis.text.y = element_text(size = 12))
+```
+
+# Favorability over Time
+
+## Column 1 {.sidebar}
 ```{r}
-
+selectInput("brand", "Brand:",
+            unique(youtube.raw$brand))
 ```
 
-### Chart C
+## Column 2 {data-height=650}
+```{r, fig.width = 12, fig.height = 10}
+renderPlot({youtube.mod %>%
+  #filter(view_count > 1000) %>%
+  filter(!is.na(like_count) & brand == input$brand) %>%
+  group_by(year) %>%
+  mutate(lmean = 10**mean(log10(like_to_dislike), na.rm = TRUE)) %>%
+  ggplot(aes(x = year, y = like_to_dislike)) +
+  geom_point(aes(size = view_group, color = view_factor), 
+             alpha = 0.75) +
+  geom_smooth(method = "lm", color = "black", fullrange = FALSE) +
+  scale_y_continuous(trans = 'log10') +
+  scale_size(guide = "none") +
+  scale_color_discrete(na.translate = F, drop = F) +
+  labs(title = "Commercial Favorability over Time",
+       subtitle = "Favorability averages are relatively constant over time.",
+       x = "Year",
+       y = "Likes-to-Dislikes Ratio",
+       caption = "NOTE: Y-axis is on a log10 scale.",
+       color = "View Count") +
+  theme_bw() +
+  theme(text = element_text(size = 15),
+        plot.title = element_text(size = 20),
+        axis.text.x = element_text(size = 12),
+        axis.text.y = element_text(size = 12))
+}, height = 800, width = 1200)
+```
 
+# Favorability by Brand
+
+## Column 1
+### Interactive Figure 2
+```{r, fig.width = 12, fig.height = 10}
+p <- youtube.mod %>%
+  filter(!is.na(like_count)) %>%
+  ggplot(aes(x = fct_reorder(brand, like_to_dislike, .fun = median), 
+             y = like_to_dislike)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_point(aes(size = view_group, color = view_factor, 
+                 custom1 = title, custom2 = year, custom3 = view_count), alpha = 0.75,
+             position=position_jitter(width=0.15)) +
+  scale_y_continuous(trans = 'log10') +
+  scale_size(guide = "none") +
+  labs(title = "Commercial Favorability and Viewership by Brand", 
+       subtitle = "Kia commericals had the highest average likes-to-dislikes ratio. \n Doritos had the most commericals with > 1 million views.",
+       x = "Brand",
+       y = "Likes-to-Dislikes Ratio",
+       color = "View Count",
+       caption = "NOTE: Y-axis is on a log10 scale.") +
+  theme_bw() +
+  theme(axis.text.x = element_text(size = 12, angle = -35),
+        text = element_text(size = 15),
+        plot.title = element_text(size = 20),
+        axis.text.y = element_text(size = 12))
+
+ply <- ggplotly(p, tooltip = c("y", "custom1", "custom2", "custom3"))
+style(ply, hoverinfo = "none", traces = 1)
+```
+
+# Analysis
+
+## Column 1
+### Modeling Favorability of Superbowl Commercials
+After using the `leaps` package to identify the subset of variables that maximized Adjusted R^2, I used `lm` to model log-transformed like-to-dislike ratio (i.e., `like_to_dislike_log10`) as a function of `year`, `view_count_log10`, `patriotic`, `animals`, `danger`, and `celebrity`. I then ran a one-way ANOVA on the model and found that the significant sources of variation in `like_to_dislike_log10` came from `view_count_log10`, `celebrity`, and `danger`.
+
+Most notably, the model estimates that, **on average**:
+
+  1. a 10-fold increase in view count is associated with an approximately 50% increase in like-to-dislike ratio. 
+  
+  2. the use of danger in a commercial is associated with an approximately 37% increase in like-to-dislike ratio.
+  
+  3. the use of celebrities in a commercial is associated with an approximately 80% increase in like-to-dislike ratio.
+  
+It is important to note that, based on the model diagnostic plots, extreme estimates of the like-to-dislike ratio tend to actually be *over*estimates. Therefore, really large and really small estimates of like-to-dislike ratio should be taken with a healthy degree of skepticism.
+
+### Summary
+Overall, this analysis showed that variations in superbowl commercial favorability, as measured by like-to-dislike ratio, can be explained in part by their view count on youtube, the inclusion of "dangerous" themes, and the inclusion of celebrities. It is important to note that this analysis was conducted on a limited sample of superbowl commercials provided by Five-Thirty-Eight, and so the findings from this analysis may not generalize to a larger, more representative sample.
+
+## Column 2 {.tabset}
+### Linear Regression Model (Adj-R^2 maximized)
+```{r, font-size: 30px}
+youtube.subset <- youtube.mod %>%
+  #filter(view_count > 1000) %>%
+  select(year, funny, show_product_quickly, patriotic, animals, danger, 
+         celebrity, use_sex, view_count_log10, like_to_dislike_log10) %>%
+  filter(!is.na(view_count_log10) & !is.na(like_to_dislike_log10))
+
+mod <- lm(like_to_dislike_log10 ~ 1 + year + view_count_log10 + factor(patriotic) + factor(animals) + factor(danger) + factor(celebrity), data = youtube.subset)
+
+anova(mod)
+summary(mod)
+```
+
+### Residuals vs. Fitted
 ```{r}
-
+plot(mod, which = 1)
 ```
+
+### Normal Q-Q
+```{r}
+plot(mod, which = 2)
+```
+
+### Scale-Location
+```{r}
+plot(mod, which = 3)
+```
+
+### Cook's Distance
+```{r}
+plot(mod, which = 4)
+```
+
+### Residual's vs. Leverage
+```{r}
+plot(mod, which = 5)
+```
+
+
 
